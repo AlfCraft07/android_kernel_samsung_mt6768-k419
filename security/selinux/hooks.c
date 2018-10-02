@@ -139,13 +139,8 @@ __setup("enforcing=", enforcing_setup);
 #define selinux_enforcing_boot 1
 #endif
 
+int selinux_enabled __lsm_ro_after_init = 1;
 #ifdef CONFIG_SECURITY_SELINUX_BOOTPARAM
-#if (defined CONFIG_KDP_CRED && defined CONFIG_SAMSUNG_PRODUCT_SHIP)
-int selinux_enabled __kdp_ro_aligned = CONFIG_SECURITY_SELINUX_BOOTPARAM_VALUE;
-#else
-int selinux_enabled = CONFIG_SECURITY_SELINUX_BOOTPARAM_VALUE;
-#endif
-
 static int __init selinux_enabled_setup(char *str)
 {
 	unsigned long enabled;
@@ -162,11 +157,6 @@ static int __init selinux_enabled_setup(char *str)
 	return 1;
 }
 __setup("selinux=", selinux_enabled_setup);
-#else
-#if (defined CONFIG_KDP_CRED && defined CONFIG_SAMSUNG_PRODUCT_SHIP)
-int selinux_enabled __kdp_ro_aligned = 1;
-#else
-int selinux_enabled = 1;
 #endif
 #endif
 
