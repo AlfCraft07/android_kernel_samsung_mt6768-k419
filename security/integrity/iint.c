@@ -22,9 +22,7 @@
 #include <linux/file.h>
 #include <linux/uaccess.h>
 #include <linux/security.h>
-#ifdef CONFIG_FIVE
-#include <uapi/linux/magic.h>
-#endif
+#include <linux/lsm_hooks.h>
 #include "integrity.h"
 
 static struct rb_root integrity_iint_tree = RB_ROOT;
