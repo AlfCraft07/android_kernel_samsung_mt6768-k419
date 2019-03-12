@@ -37,30 +37,22 @@
 
 static inline pmd_t *pmd_alloc_one(struct mm_struct *mm, unsigned long addr)
 {
-#ifdef CONFIG_RKP
-	/* FIXME not zeroing the page */
-	pmd_t *rkp_ropage = NULL;
+	struct page *page;
 
-	if (mm == &init_mm) {
-		rkp_ropage = (pmd_t *)rkp_ro_alloc();
-		if (rkp_ropage)
-			return rkp_ropage;
-		else
-			return (pmd_t *)__get_free_page(PGALLOC_GFP);
+	page = alloc_page(PGALLOC_GFP);
+	if (!page)
+		return NULL;
+	if (!pgtable_pmd_page_ctor(page)) {
+		__free_page(page);
+		return NULL;
 	}
-	else
-#endif
-	return (pmd_t *)__get_free_page(PGALLOC_GFP);
+	return page_address(page);
 }
 
 static inline void pmd_free(struct mm_struct *mm, pmd_t *pmdp)
 {
 	BUG_ON((unsigned long)pmdp & (PAGE_SIZE-1));
-#ifdef CONFIG_RKP
-	if(is_rkp_ro_buffer((u64)pmdp))
-		rkp_ro_free((void *)pmdp);
-	else
-#endif
+	pgtable_pmd_page_dtor(virt_to_page(pmdp));
 	free_page((unsigned long)pmdp);
 }
 
