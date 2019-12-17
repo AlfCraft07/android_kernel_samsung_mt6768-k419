@@ -71,11 +71,7 @@
 
 struct netlbl_lsm_secattr;
 
-#if (defined CONFIG_KDP_CRED && defined CONFIG_SAMSUNG_PRODUCT_SHIP)
-extern int selinux_enabled __kdp_ro_aligned;
-#else
-extern int selinux_enabled;
-#endif
+extern int selinux_enabled_boot;
 
 /* Policy capabilities */
 enum {
@@ -105,7 +101,9 @@ struct selinux_avc;
 struct selinux_ss;
 
 struct selinux_state {
+#ifdef CONFIG_SECURITY_SELINUX_DISABLE
 	bool disabled;
+#endif
 #ifdef CONFIG_SECURITY_SELINUX_DEVELOP
 	bool enforcing;
 #endif
