@@ -62,6 +62,14 @@ config ANDROID_BINDER_USER_TRACKING
 	  when the transaction is done or be free, this transaction would be
 	  checked whether it executed overtime.
 	  If yes, printing out the detailed info.
+config ANDROID_VENDOR_HOOKS
+	bool "Android Vendor Hooks"
+	depends on TRACEPOINTS
+	---help---
+	  Enable vendor hooks implemented as tracepoints
+
+	  Allow vendor modules to attach to tracepoint "hooks" defined via
+	  DECLARE_HOOK or DECLARE_RESTRICTED_HOOK.
 
 endif # if ANDROID
 
