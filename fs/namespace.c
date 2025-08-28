@@ -277,11 +277,6 @@ static struct mount *alloc_vfsmnt(const char *name)
 		mnt->mnt_count = 1;
 		mnt->mnt_writers = 0;
 #endif
-#ifdef CONFIG_KDP_NS
-		kdp_set_ns_data(mnt->mnt, NULL);
-#else
-		mnt->mnt.data = NULL;
-#endif
 
 		INIT_HLIST_NODE(&mnt->mnt_hash);
 		INIT_LIST_HEAD(&mnt->mnt_child);
@@ -665,11 +660,6 @@ int sb_prepare_remount_readonly(struct super_block *sb)
 
 static void free_vfsmnt(struct mount *mnt)
 {
-#ifdef CONFIG_KDP_NS
-	kfree(mnt->mnt->data);
-#else
-	kfree(mnt->mnt.data);
-#endif
 	kfree_const(mnt->mnt_devname);
 #ifdef CONFIG_SMP
 	free_percpu(mnt->mnt_pcp);
@@ -1094,19 +1084,6 @@ vfs_kern_mount(struct file_system_type *type, int flags, const char *name, void 
 	if (!mnt)
 		return ERR_PTR(-ENOMEM);
 
-	if (type->alloc_mnt_data) {
-#ifdef CONFIG_KDP_NS
-		kdp_set_ns_data(mnt->mnt, type->alloc_mnt_data());
-		if (!mnt->mnt->data) {
-#else
-		mnt->mnt.data = type->alloc_mnt_data();
-		if (!mnt->mnt.data) {
-#endif
-			mnt_free_id(mnt);
-			free_vfsmnt(mnt);
-			return ERR_PTR(-ENOMEM);
-		}
-	}
 	if (flags & SB_KERNMOUNT)
 #ifdef CONFIG_KDP_NS
 		kdp_set_mnt_flags(mnt->mnt, MNT_INTERNAL);
@@ -1172,19 +1149,6 @@ static struct mount *clone_mnt(struct mount *old, struct dentry *root,
 	mnt = alloc_vfsmnt(old->mnt_devname);
 	if (!mnt)
 		return ERR_PTR(-ENOMEM);
-
-	if (sb->s_op->clone_mnt_data) {
-#ifdef CONFIG_KDP_NS
-		kdp_set_ns_data(mnt->mnt, sb->s_op->clone_mnt_data(old->mnt->data));
-		if (!mnt->mnt->data) {
-#else
-		mnt->mnt.data = sb->s_op->clone_mnt_data(old->mnt.data);
-		if (!mnt->mnt.data) {
-#endif
-			err = -ENOMEM;
-			goto out_free;
-		}
-	}
 
 	if (flag & (CL_SLAVE | CL_PRIVATE | CL_SHARED_TO_SLAVE))
 		mnt->mnt_group_id = 0; /* not a peer of original */
@@ -2680,14 +2644,8 @@ static int do_remount(struct path *path, int ms_flags, int sb_flags,
 		err = change_mount_flags(path->mnt, ms_flags);
 	else if (!ns_capable(sb->s_user_ns, CAP_SYS_ADMIN))
 		err = -EPERM;
-	else {
+	else
 		err = do_remount_sb(sb, sb_flags, data, 0);
-		namespace_lock();
-		lock_mount_hash();
-		propagate_remount(mnt);
-		unlock_mount_hash();
-		namespace_unlock();
-	}
 	if (!err) {
 		lock_mount_hash();
 #ifdef CONFIG_KDP_NS
