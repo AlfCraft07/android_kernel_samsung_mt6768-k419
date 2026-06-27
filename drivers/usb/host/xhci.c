@@ -238,17 +238,12 @@ int xhci_reset(struct xhci_hcd *xhci, u64 timeout_us)
 	if (xhci->quirks & XHCI_INTEL_HOST)
 		udelay(1000);
 
-<<<<<<< HEAD
 	ret = xhci_handshake_check_state(xhci, &xhci->op_regs->command,
 			CMD_RESET, 0, 1000 * 1000);
 	if (ret) {
 #if defined(CONFIG_USB_HOST_SAMSUNG_FEATURE)
 		xhci_warn(xhci, "%s CMD_RESET is fail!!\n", __func__);
 #endif
-=======
-	ret = xhci_handshake(&xhci->op_regs->command, CMD_RESET, 0, timeout_us);
-	if (ret)
->>>>>>> v4.19.250
 		return ret;
 	}
 
@@ -261,17 +256,12 @@ int xhci_reset(struct xhci_hcd *xhci, u64 timeout_us)
 	 * xHCI cannot write to any doorbells or operational registers other
 	 * than status until the "Controller Not Ready" flag is cleared.
 	 */
-<<<<<<< HEAD
 	ret = xhci_handshake(&xhci->op_regs->status,
 			STS_CNR, 0, 1000 * 1000);
 #if defined(CONFIG_USB_HOST_SAMSUNG_FEATURE)
 	if (ret)
 		xhci_warn(xhci, "%s STS_CNR is fail!!\n", __func__);
 #endif
-=======
-	ret = xhci_handshake(&xhci->op_regs->status, STS_CNR, 0, timeout_us);
-
->>>>>>> v4.19.250
 	for (i = 0; i < 2; i++) {
 		xhci->bus_state[i].port_c_suspend = 0;
 		xhci->bus_state[i].suspended_ports = 0;

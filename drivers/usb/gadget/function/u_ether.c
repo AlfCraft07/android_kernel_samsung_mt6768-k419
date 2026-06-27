@@ -1144,21 +1144,16 @@ struct eth_dev *gether_setup_name(struct usb_gadget *g,
 		net->addr_assign_type = NET_ADDR_RANDOM;
 		dev_warn(&g->dev,
 			"using random %s ethernet address\n", "self");
-<<<<<<< HEAD
 
 	ether_addr_copy(dev->host_mac, a);
+	} else {
+		net->addr_assign_type = NET_ADDR_SET;
+	}
+
 	pr_debug("%s, rndis: %x:%x:%x:%x:%x:%x\n", __func__,
 		   dev->host_mac[0], dev->host_mac[1],
 		   dev->host_mac[2], dev->host_mac[3],
 		   dev->host_mac[4], dev->host_mac[5]);
-=======
-	} else {
-		net->addr_assign_type = NET_ADDR_SET;
-	}
-	if (get_ether_addr(host_addr, dev->host_mac))
-		dev_warn(&g->dev,
-			"using random %s ethernet address\n", "host");
->>>>>>> v4.19.250
 
 	if (ethaddr)
 		memcpy(ethaddr, dev->host_mac, ETH_ALEN);

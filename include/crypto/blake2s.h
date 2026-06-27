@@ -3,25 +3,14 @@
  * Copyright (C) 2015-2019 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
  */
 
-<<<<<<< HEAD
-#ifndef BLAKE2S_H
-#define BLAKE2S_H
-
-=======
 #ifndef _CRYPTO_BLAKE2S_H
 #define _CRYPTO_BLAKE2S_H
 
 #include <linux/bug.h>
->>>>>>> v4.19.250
 #include <linux/types.h>
 #include <linux/kernel.h>
 #include <linux/string.h>
 
-<<<<<<< HEAD
-#include <asm/bug.h>
-
-=======
->>>>>>> v4.19.250
 enum blake2s_lengths {
 	BLAKE2S_BLOCK_SIZE = 64,
 	BLAKE2S_HASH_SIZE = 32,
@@ -110,11 +99,7 @@ static inline void blake2s(u8 *out, const u8 *in, const u8 *key,
 	blake2s_final(&state, out);
 }
 
-<<<<<<< HEAD
 void blake2s256_hmac(u8 *out, const u8 *in, const u8 *key, const size_t inlen,
 		     const size_t keylen);
 
 #endif /* BLAKE2S_H */
-=======
-#endif /* _CRYPTO_BLAKE2S_H */
->>>>>>> v4.19.250
