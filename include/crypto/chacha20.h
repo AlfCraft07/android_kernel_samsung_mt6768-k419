@@ -18,7 +18,11 @@ struct chacha20_ctx {
 	u32 key[8];
 };
 
-void chacha20_block(u32 *state, u8 *stream);
+void chacha_block_generic(u32 *state, u8 *stream, int nrounds);
+static inline void chacha20_block(u32 *state, u8 *stream)
+{
+	chacha_block_generic(state, stream, 20);
+}
 void crypto_chacha20_init(u32 *state, struct chacha20_ctx *ctx, u8 *iv);
 int crypto_chacha20_setkey(struct crypto_skcipher *tfm, const u8 *key,
 			   unsigned int keysize);
