@@ -1255,7 +1255,6 @@ static int set_machine_constraints(struct regulator_dev *rdev)
 			return ret;
 		}
 
-		if (rdev->constraints->always_on)
 			rdev->use_count++;
 	}
 
