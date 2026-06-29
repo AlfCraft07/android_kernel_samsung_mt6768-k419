@@ -21,7 +21,7 @@
 #include <linux/sec_ext.h>
 #endif
 
-static DEFINE_RT_MUTEX(pmsg_lock);
+static DEFINE_MUTEX(pmsg_lock);
 
 static ssize_t write_pmsg(struct file *file, const char __user *buf,
 			  size_t count, loff_t *ppos)
@@ -54,7 +54,7 @@ static ssize_t write_pmsg(struct file *file, const char __user *buf,
 	__copy_from_user(sec_buf, buf, sec_count);
 #endif /* CONFIG_SEC_EXT */
 	ret = psinfo->write_user(&record, buf);
-	rt_mutex_unlock(&pmsg_lock);
+	mutex_unlock(&pmsg_lock);
 	return ret ? ret : count;
 }
 
