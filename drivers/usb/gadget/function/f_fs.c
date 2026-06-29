@@ -1946,15 +1946,11 @@ static void functionfs_unbind(struct ffs_data *ffs)
 	ENTER();
 
 	if (!WARN_ON(!ffs->gadget)) {
-		/* dequeue before freeing ep0req */
-		usb_ep_dequeue(ffs->gadget->ep0, ffs->ep0req);
-		mutex_lock(&ffs->mutex);
-		usb_ep_free_request(ffs->gadget->ep0, ffs->ep0req);
+		temp_ep0req = ffs->ep0req;
 		ffs->ep0req = NULL;
 		usb_ep_free_request(ffs->gadget->ep0, temp_ep0req);
 		ffs->gadget = NULL;
 		clear_bit(FFS_FL_BOUND, &ffs->flags);
-		mutex_unlock(&ffs->mutex);
 		ffs_data_put(ffs);
 	}
 }
