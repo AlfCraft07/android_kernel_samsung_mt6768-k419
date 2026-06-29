@@ -15,7 +15,6 @@
 #include <linux/device.h>
 #include <linux/fs.h>
 #include <linux/uaccess.h>
-#include <linux/rtmutex.h>
 #include "internal.h"
 #ifdef CONFIG_SEC_EXT
 #include <linux/sec_ext.h>
