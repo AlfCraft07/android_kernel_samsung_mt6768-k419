@@ -72,6 +72,7 @@
 
 struct netlbl_lsm_secattr;
 
+extern int selinux_enabled;
 extern int selinux_enabled_boot;
 
 /* Policy capabilities */
