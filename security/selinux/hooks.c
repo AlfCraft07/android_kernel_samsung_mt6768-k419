@@ -113,6 +113,13 @@ static DEFINE_MUTEX(selinux_sdcardfs_lock);
 // ] SEC_SELINUX_PORTING_COMMON
 
 #ifdef CONFIG_SECURITY_SELINUX_DEVELOP
+#if (defined CONFIG_KDP_CRED && defined CONFIG_SAMSUNG_PRODUCT_SHIP)
+static int selinux_enforcing_boot __kdp_ro_aligned;
+int selinux_enforcing __kdp_ro_aligned;
+#else
+static int selinux_enforcing_boot;
+int selinux_enforcing;
+#endif
 static int selinux_enforcing_boot __initdata;
 
 static int __init enforcing_setup(char *str)
@@ -138,14 +145,32 @@ __setup("enforcing=", enforcing_setup);
 
 int selinux_enabled_boot __initdata = 1;
 #ifdef CONFIG_SECURITY_SELINUX_BOOTPARAM
+#if (defined CONFIG_KDP_CRED && defined CONFIG_SAMSUNG_PRODUCT_SHIP)
+int selinux_enabled __kdp_ro_aligned = CONFIG_SECURITY_SELINUX_BOOTPARAM_VALUE;
+#else
+int selinux_enabled = CONFIG_SECURITY_SELINUX_BOOTPARAM_VALUE;
+#endif
 static int __init selinux_enabled_setup(char *str)
 {
 	unsigned long enabled;
 	if (!kstrtoul(str, 0, &enabled))
-		selinux_enabled_boot = enabled ? 1 : 0;
+	{
+// [ SEC_SELINUX_PORTING_COMMON
+#ifdef CONFIG_ALWAYS_ENFORCE
+		selinux_enabled = 1;
+#else
+		selinux_enabled = enabled ? 1 : 0;
+	#endif
+// ] SEC_SELINUX_PORTING_COMMON
+	}
 	return 1;
 }
 __setup("selinux=", selinux_enabled_setup);
+#else
+#if (defined CONFIG_KDP_CRED && defined CONFIG_SAMSUNG_PRODUCT_SHIP)
+int selinux_enabled __kdp_ro_aligned = 1;
+#else
+int selinux_enabled = 1;
 #endif
 #endif
 
@@ -2700,13 +2725,7 @@ static int selinux_sb_kern_mount(struct super_block *sb)
 
 	ad.type = LSM_AUDIT_DATA_DENTRY;
 	ad.u.dentry = sb->s_root;
-	rc = superblock_has_perm(cred, sb, FILESYSTEM__MOUNT, &ad);
-	out:
-	if((strcmp(sb->s_type->name,"sdcardfs")) == 0)
-		mutex_unlock(&selinux_sdcardfs_lock);
-	// ] SEC_SELINUX_PORTING_COMMON
-	
-	return rc;
+	return superblock_has_perm(cred, sb, FILESYSTEM__MOUNT, &ad);
 }
 
 static int selinux_sb_statfs(struct dentry *dentry)
@@ -6869,7 +6888,7 @@ struct lsm_blob_sizes selinux_blob_sizes __lsm_ro_after_init = {
  * when disabling SELinux at runtime.
  */
 static struct security_hook_list selinux_hooks[] __lsm_ro_after_init = {
-#endif
+
 	LSM_HOOK_INIT(binder_set_context_mgr, selinux_binder_set_context_mgr),
 	LSM_HOOK_INIT(binder_transaction, selinux_binder_transaction),
 	LSM_HOOK_INIT(binder_transfer_binder, selinux_binder_transfer_binder),
@@ -7138,6 +7157,12 @@ static struct security_hook_list selinux_hooks[] __lsm_ro_after_init = {
 static __init int selinux_init(void)
 {
 	pr_info("SELinux:  Initializing.\n");
+
+// [ SEC_SELINUX_PORTING_COMMON
+#ifdef CONFIG_ALWAYS_ENFORCE
+		selinux_enforcing_boot = 1;
+#endif
+// ] SEC_SELINUX_PORTING_COMMON
 
 	memset(&selinux_state, 0, sizeof(selinux_state));
 	enforcing_set(&selinux_state, selinux_enforcing_boot);

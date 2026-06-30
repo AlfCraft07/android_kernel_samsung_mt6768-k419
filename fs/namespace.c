@@ -8,6 +8,7 @@
  * Heavily rewritten.
  */
 
+#include <linux/fslog.h>
 #include <linux/syscalls.h>
 #include <linux/export.h>
 #include <linux/capability.h>
@@ -543,6 +544,9 @@ static int mnt_make_readonly(struct mount *mnt)
 {
 	int ret = 0;
 
+#ifdef CONFIG_KDP_NS
+	kdp_set_mnt_flags(mnt->mnt, MNT_WRITE_HOLD);
+#else
 	mnt->mnt.mnt_flags |= MNT_WRITE_HOLD;
 #endif
 	/*
@@ -586,6 +590,7 @@ static int mnt_make_readonly(struct mount *mnt)
 #else
 	mnt->mnt.mnt_flags &= ~MNT_WRITE_HOLD;
 	return ret;
+#endif
 }
 
 int sb_prepare_remount_readonly(struct super_block *sb)
