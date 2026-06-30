@@ -120,3 +120,15 @@ config MTK_QOS_V2
 	  It supports BW prediction, BW bound detection, and BW limiter.
 	  It is also mapped with sspm qos v2.
 	  If unsure, say N.
+
+config SLM_OC_GPU
+	bool "gpu overclock"
+	default n
+	---help---
+	  oc mali g52 mc2, increase idx table & increase voltage
+
+config SLM_OC_CCI
+	bool "cci overclock"
+	default n
+	---help---
+	  oc cci, increase little core voltage(cci use same rails as L core)
