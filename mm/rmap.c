@@ -550,11 +550,9 @@ out:
  *
  * Its a little more complex as it tries to keep the fast path to a single
  * atomic op -- the trylock. If we fail the trylock, we fall back to getting a
- * reference like with page_get_anon_vma() and then block on the mutex
- * on !rwc->try_lock case.
+ * reference like with page_get_anon_vma() and then block on the mutex.
  */
-struct anon_vma *page_lock_anon_vma_read(struct page *page,
-					struct rmap_walk_control *rwc)
+struct anon_vma *page_lock_anon_vma_read(struct page *page)
 {
 	struct anon_vma *anon_vma = NULL;
 	struct anon_vma *root_anon_vma;
@@ -568,19 +566,7 @@ struct anon_vma *page_lock_anon_vma_read(struct page *page,
 		goto out;
 
 	anon_vma = (struct anon_vma *) (anon_mapping - PAGE_MAPPING_ANON);
-
-	if (!is_anon_vma_type(anon_vma)) {
-		anon_vma = NULL;
-		goto out;
-	}
-
 	root_anon_vma = READ_ONCE(anon_vma->root);
-
-	if (!is_anon_vma_type(root_anon_vma)) {
-		anon_vma = NULL;
-		goto out;
-	}
-
 	if (down_read_trylock(&root_anon_vma->rwsem)) {
 		/*
 		 * If the page is still mapped, then this anon_vma is still
@@ -591,12 +577,6 @@ struct anon_vma *page_lock_anon_vma_read(struct page *page,
 			up_read(&root_anon_vma->rwsem);
 			anon_vma = NULL;
 		}
-		goto out;
-	}
-
-	if (rwc && rwc->try_lock) {
-		anon_vma = NULL;
-		rwc->contended = true;
 		goto out;
 	}
 
@@ -896,8 +876,7 @@ static bool invalid_page_referenced_vma(struct vm_area_struct *vma, void *arg)
  * @vm_flags: collect encountered vma->vm_flags who actually referenced the page
  *
  * Quick test_and_clear_referenced for all mappings to a page,
- * returns the number of ptes which referenced the page. Return -1 if
- * the function bailed out to rmap lock contention.
+ * returns the number of ptes which referenced the page.
  */
 int page_referenced(struct page *page,
 		    int is_locked,
@@ -913,7 +892,6 @@ int page_referenced(struct page *page,
 		.rmap_one = page_referenced_one,
 		.arg = (void *)&pra,
 		.anon_lock = page_lock_anon_vma_read,
-		.try_lock = true,
 	};
 
 	*vm_flags = 0;
@@ -944,7 +922,7 @@ int page_referenced(struct page *page,
 	if (we_locked)
 		unlock_page(page);
 
-	return rwc.contended ? -1 : pra.referenced;
+	return pra.referenced;
 }
 
 static bool page_mkclean_one(struct page *page, struct vm_area_struct *vma,
@@ -1879,17 +1857,7 @@ static struct anon_vma *rmap_walk_anon_lock(struct page *page,
 	if (!anon_vma)
 		return NULL;
 
-	if (anon_vma_trylock_read(anon_vma))
-		goto out;
-
-	if (rwc->try_lock) {
-		anon_vma = NULL;
-		rwc->contended = true;
-		goto out;
-	}
-
 	anon_vma_lock_read(anon_vma);
-out:
 	return anon_vma;
 }
 
