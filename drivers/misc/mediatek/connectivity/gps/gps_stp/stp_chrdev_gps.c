@@ -936,7 +936,7 @@ long GPS_unlocked_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		gps_boot_time.now_time = ktime_get_boottime_ns();
 		gps_boot_time.arch_counter = __arch_counter_get_cntvct();
 		#else
-		gps_boot_time.now_time = ktime_get_boot_ns();
+		gps_boot_time.now_time = ktime_get_boottime_ns();
 		gps_boot_time.arch_counter = arch_counter_get_cntvct();
 		#endif
 		local_irq_restore(flags);
