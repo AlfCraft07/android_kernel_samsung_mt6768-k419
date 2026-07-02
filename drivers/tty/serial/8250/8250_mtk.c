@@ -225,9 +225,9 @@ static void mtk8250_dma_enable(struct uart_8250_port *up)
 
 static int mtk8250_startup(struct uart_port *port)
 {
+	struct mtk8250_data *data = port->private_data;
 #ifdef CONFIG_SERIAL_8250_DMA
 	struct uart_8250_port *up = up_to_u8250p(port);
-	struct mtk8250_data *data = port->private_data;
 
 	/* disable DMA for console */
 	if (uart_console(port))
@@ -454,9 +454,16 @@ mtk8250_set_termios(struct uart_port *port, struct ktermios *termios,
 
 static int mtk8250_handle_irq(struct uart_port *port)
 {
-	struct uart_8250_port *up = up_to_u8250p(port);
+	struct uart_8250_port *up;
 	unsigned int iir;
 	int ret;
+
+	if (!port)
+		return IRQ_NONE;
+
+	up = up_to_u8250p(port);
+	if (!up)
+		return IRQ_NONE;
 
 	serial8250_rpm_get(up);
 
@@ -468,7 +475,6 @@ static int mtk8250_handle_irq(struct uart_port *port)
 #endif
 #endif
 #endif
-
 	iir = serial_port_in(port, UART_IIR);
 	ret = serial8250_handle_irq(port, iir);
 
