@@ -4398,6 +4398,7 @@ errout:
 	return ERR_PTR(err);
 }
 
+/* The vmlinux BTF section is linked directly into the image. */
 extern char __weak __start_BTF[];
 extern char __weak __stop_BTF[];
 extern struct btf *btf_vmlinux;
@@ -4577,9 +4578,7 @@ struct btf *btf_parse_vmlinux(void)
 
 	btf->data = __start_BTF;
 	btf->data_size = __stop_BTF - __start_BTF;
-	btf->data = _binary__btf_vmlinux_bin_start;
-	btf->data_size = _binary__btf_vmlinux_bin_end -
-		_binary__btf_vmlinux_bin_start;
+
 	btf->kernel_btf = true;
 	strscpy(btf->name, "vmlinux", sizeof(btf->name));
 
