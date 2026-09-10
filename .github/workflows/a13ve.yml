@@ -113,6 +113,7 @@ jobs:
           export CC=$TC/bin/clang
           export CLANG_TRIPLE=aarch64-linux-gnu-
           export ARCH=arm64
+          export TERM=xterm-256color
           #export ANDROID_MAJOR_VERSION=r
           
           # Flags found in kernel.mk
