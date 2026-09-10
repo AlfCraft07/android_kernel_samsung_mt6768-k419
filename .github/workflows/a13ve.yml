@@ -114,10 +114,11 @@ jobs:
           # Flags found in kernel.mk
           export LLVM=1
           export LLVM_IAS=1
-          export KCFLAGS=-w
-          export CONFIG_SECTION_MISMATCH_WARN_ONLY=y
+          
+          # 2. Clean
+          rm -rf out && mkdir -p out
 
-          # 5. Compile (KERNEL_MAKE_CMD)
+          # 3. Compile (KERNEL_MAKE_CMD)
           # For devices with CONFIG_BUILD_ARM64_DT_OVERLAY=y (overlay mode):
           # - Build Image.gz (not Image.gz-dtb) to avoid dtbs dependency
           # - Image.gz-dtb depends on 'dtbs' target which tries to build overlays
@@ -127,11 +128,7 @@ jobs:
           echo "--> Building kernel..."
           echo "--> Compiling Image.gz..."
           set -o pipefail
-          make -C $(pwd) O=$(pwd)/out KCFLAGS=-w CONFIG_SECTION_MISMATCH_WARN_ONLY=y LLVM=1 clean && make -C $(pwd) O=$(pwd)/out KCFLAGS=-w CONFIG_SECTION_MISMATCH_WARN_ONLY=y LLVM=1 mrproper
-          clear
-          make -s -C $(pwd) O=$(pwd)/out KCFLAGS=-w CONFIG_SECTION_MISMATCH_WARN_ONLY=y LLVM=1 a13ve_defconfig
-          make -s -C $(pwd) O=$(pwd)/out KCFLAGS=-w CONFIG_SECTION_MISMATCH_WARN_ONLY=y LLVM=1 -j$(nproc)
-
+          make O=out a13ve_defconfig -j$(nproc) Image.gz 2>&1 | tee build.log
           BUILD_STATUS=$?
           
           if [ $BUILD_STATUS -ne 0 ]; then
