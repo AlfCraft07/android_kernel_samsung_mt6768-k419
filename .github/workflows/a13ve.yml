@@ -1,0 +1,250 @@
+name: Galaxy A13 (A137F) Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main", "master", "copilot/**" ]
+
+jobs:
+  build:
+    name: Build Kernel (LineageOS Logic)
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      # -----------------------------------------------------------------------
+      # CACHING: Saves time by not re-downloading Clang every run
+      # -----------------------------------------------------------------------
+      - name: Cache Proton Clang
+        id: cache-clang
+        uses: actions/cache@v4
+        with:
+          path: ~/toolchains/clang
+          key: ${{ runner.os }}-proton-clang-v1
+
+      - name: Setup Proton Clang
+        if: steps.cache-clang.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/toolchains
+          echo "Cloning Proton Clang..."
+          git clone https://github.com/kdrag0n/proton-clang.git --depth=1 ~/toolchains/clang
+
+      # -----------------------------------------------------------------------
+      # DEPENDENCIES: Standard build tools required by kernel.mk
+      # -----------------------------------------------------------------------
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-essential ccache cpio flex git kmod \
+            libncurses5-dev libssl-dev rsync zip unzip wget curl ca-certificates \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu device-tree-compiler
+
+      # -----------------------------------------------------------------------
+      # KERNELSU-NEXT: Using Legacy Setup Script
+      # -----------------------------------------------------------------------
+      - name: Setup KernelSU-Next
+        run: |
+          echo "=========================================="
+          echo "KernelSU-Next Setup (Legacy)"
+          echo "=========================================="
+          
+          # Download and run KernelSU-Next legacy setup script
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/legacy/kernel/setup.sh" | bash -s legacy
+          
+          # Fix timespec64 pointer mismatch in sulog/event.c for 4.14 kernels
+          python3 -c "p = 'KernelSU-Next/kernel/sulog/event.c'; content = open(p).read(); open(p, 'w').write(content.replace('get_monotonic_boottime(&ts)', 'ktime_get_boottime_ts64(&ts)'))"
+          
+          # Fix undefined ksu_input_hook symbol in ksud_integration.c for kprobes mode
+          python3 -c "p = 'KernelSU-Next/kernel/runtime/ksud_integration.c'; content = open(p).read(); open(p, 'w').write(content.replace('static struct work_struct __maybe_unused stop_input_hook_work;', 'static struct work_struct __maybe_unused stop_input_hook_work;\nbool ksu_input_hook __read_mostly = true;'))"
+          
+          # Fix NULL pointer dereference in ksu_handle_execve_sucompat
+          python3 -c "p = 'KernelSU-Next/kernel/feature/sucompat.c'; content = open(p).read(); open(p, 'w').write(content.replace('const char __user *const __user *argv_user = (const char __user *const __user *)PT_REGS_PARM2(regs);', 'const char __user *const __user *argv_user = regs ? (const char __user *const __user *)PT_REGS_PARM2(regs) : NULL;'))"
+          python3 -c "p = 'KernelSU-Next/kernel/hook/hook_manager.c'; content = open(p).read(); open(p, 'w').write(content.replace('ksu_handle_execve_sucompat(filename_user, NULL, NULL);', 'ksu_handle_execve_sucompat(filename_user, id, regs);'))"
+          
+          echo "=========================================="
+          echo "✓ KernelSU-Next setup complete"
+          echo "=========================================="
+
+      - name: Setup AnyKernel3
+        run: |
+          git clone --depth=1 https://github.com/AlfCraft07/AnyKernel3.git ~/AnyKernel3
+          cd ~/AnyKernel3
+          cat > anykernel.sh << 'EOF'
+          #!/sbin/sh
+          # AnyKernel3 Script for GTA4XLVE
+          
+          ## AnyKernel setup
+          # begin properties
+          properties() { '
+          kernel.string=slmkernel a13ve (SM-A137F)
+          do.devicecheck=0
+          do.modules=0
+          do.systemless=1
+          do.cleanup=1
+          do.cleanuponabort=0
+          device.name1=gta4xlve
+          device.name2=gta4xl
+          device.name3=SM-P613
+          device.name4=gta4xlveu
+          device.name5=SM-P619
+          supported.versions=11-16
+          supported.patchlevels=
+          '; } # end properties
+          
+          ## AnyKernel boot install
+          # begin attributes
+          block=/dev/block/bootdevice/by-name/boot;
+          is_slot_device=0;
+          ramdisk_compression=auto;
+          patch_vbmeta_flag=auto;
+          
+          # boot header version 2 for this device
+          boot_img_hdr_ver=2
+          # end attributes
+          
+          ## AnyKernel methods (DO NOT CHANGE)
+          # import patching functions/variables - see for reference
+          . tools/ak3-core.sh;
+          
+          ## AnyKernel boot install
+          split_boot; # use split_boot to extract ramdisk and kernel
+          
+          # Install kernel image
+          flash_boot;
+          ## end boot install
+          EOF
+          chmod +x anykernel.sh
+
+      # -----------------------------------------------------------------------
+      # BUILD LOGIC: Extracted directly from LineageOS kernel.mk
+      # -----------------------------------------------------------------------
+      - name: Compile Kernel
+        run: |
+          # 1. Setup Environment Variables (mimicking BoardConfig.mk)
+          export CROSS_COMPILE=$TC/bin/aarch64-linux-gnu-
+          export LD=$TC/bin/ld.lld
+          export OBJCOPY=$TC/bin/llvm-objcopy
+          export AS=$TC/bin/llvm-as
+          export NM=$TC/bin/llvm-nm
+          export STRIP=$TC/bin/llvm-strip
+          export OBJDUMP=$TC/bin/llvm-objdump
+          export READELF=$TC/bin/llvm-readelf
+          export CC=$TC/bin/clang
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          export ARCH=arm64
+          #export ANDROID_MAJOR_VERSION=r
+          
+          # Flags found in kernel.mk
+          export LLVM=1
+          export LLVM_IAS=1
+          export KCFLAGS=-w
+          export CONFIG_SECTION_MISMATCH_WARN_ONLY=y
+
+          # 5. Compile (KERNEL_MAKE_CMD)
+          # For devices with CONFIG_BUILD_ARM64_DT_OVERLAY=y (overlay mode):
+          # - Build Image.gz (not Image.gz-dtb) to avoid dtbs dependency
+          # - Image.gz-dtb depends on 'dtbs' target which tries to build overlays
+          # - Overlays are applied by bootloader at runtime, not appended to kernel
+          # - This follows LineageOS methodology for overlay-enabled devices
+          
+          echo "--> Building kernel..."
+          echo "--> Compiling Image.gz..."
+          set -o pipefail
+          make -C $(pwd) O=$(pwd)/out KCFLAGS=-w CONFIG_SECTION_MISMATCH_WARN_ONLY=y LLVM=1 clean && make -C $(pwd) O=$(pwd)/out KCFLAGS=-w CONFIG_SECTION_MISMATCH_WARN_ONLY=y LLVM=1 mrproper
+          clear
+          make -s -C $(pwd) O=$(pwd)/out KCFLAGS=-w CONFIG_SECTION_MISMATCH_WARN_ONLY=y LLVM=1 a13ve_defconfig
+          make -s -C $(pwd) O=$(pwd)/out KCFLAGS=-w CONFIG_SECTION_MISMATCH_WARN_ONLY=y LLVM=1 -j$(nproc)
+
+          BUILD_STATUS=$?
+          
+          if [ $BUILD_STATUS -ne 0 ]; then
+            echo "Build failed with status $BUILD_STATUS"
+            echo "==================== COMPILER ERRORS ===================="
+            grep -i -n -E "error:|fatal error:|undefined reference" build.log -B 2 -A 5 || true
+            echo "=========================================================="
+            echo "Last 100 lines of build log:"
+            tail -100 build.log
+            exit $BUILD_STATUS
+          fi
+
+      # -----------------------------------------------------------------------
+      # PACKAGING: AnyKernel3
+      # -----------------------------------------------------------------------
+      - name: Create Flashable ZIP
+        run: |
+          cd ~/AnyKernel3
+          rm -rf .git* README.md
+          
+          # Create custom README for the ZIP
+          cat > README.md << 'EOF'
+          # slmkernel a13ve
+          
+          ## What's Included
+          - slmkernel for a13ve platform with 5.10 BPF backports
+          - Image.gz - Kernel image for overlay-enabled device
+          - AnyKernel3 flasher script
+          
+          ## How to Flash
+          
+          ### LineageOS Users (No TWRP needed!)
+          1. Boot into LineageOS Recovery (Vol Up + Power)
+          2. Navigate: Apply update → Apply from ADB
+          3. On PC: `adb sideload slm-a13ve-YYYYMMDD.zip`
+          4. Reboot and enjoy!
+          
+          ### TWRP/OrangeFox Users
+          1. Boot into TWRP/OrangeFox recovery
+          2. Flash this ZIP file
+          3. Reboot and enjoy!
+          
+          ## Device Compatibility
+          - Samsung Galaxy A13 (SM-A137F)
+          - Models: a13ve
+          - Android 11-16 / LineageOS 18-23
+          
+          ## Credits
+          - @IamKavy47 for the script
+          - @mertsan2007 for the kernel
+          
+          ---
+          EOF
+          
+          # Copy Artifacts
+          # For overlay-enabled devices, use Image.gz (overlays applied by bootloader)
+          if [ -f $GITHUB_WORKSPACE/out/arch/arm64/boot/Image.gz ]; then
+             cp $GITHUB_WORKSPACE/out/arch/arm64/boot/Image.gz .
+             echo "✓ Copied Image.gz"
+          else
+             echo "Build Failed: Image.gz not found"
+             exit 1
+          fi
+          
+          # Verify package contents
+          echo "Package contents:"
+          ls -lah
+          
+          # Create ZIP
+          ZIPNAME="slm-a13ve-$(date +%Y%m%d).zip"
+          zip -r9 $GITHUB_WORKSPACE/$ZIPNAME *
+          echo "✓ Created $ZIPNAME"
+          echo "ZIPNAME=$ZIPNAME" >> $GITHUB_ENV
+
+      - name: Upload Flashable ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: a13ve
+          path: ${{ env.ZIPNAME }}
+
+      - name: Upload Build Log (Debug)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
