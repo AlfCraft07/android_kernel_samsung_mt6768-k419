@@ -312,8 +312,13 @@ static void mtk8250_set_flow_ctrl(struct uart_8250_port *up, int mode)
 			(serial_in(up, MTK_UART_EFR) &
 			(~(MTK_UART_EFR_HW_FC | MTK_UART_EFR_SW_FC_MASK))));
 
-		serial_out(up, UART_XON1, START_CHAR(port->state->port.tty));
-		serial_out(up, UART_XOFF1, STOP_CHAR(port->state->port.tty));
+		if (port->state && port->state->port.tty) {
+			serial_out(up, UART_XON1, START_CHAR(port->state->port.tty));
+			serial_out(up, UART_XOFF1, STOP_CHAR(port->state->port.tty));
+		} else {
+			serial_out(up, UART_XON1, 0x11); /* DC1 / XON */
+			serial_out(up, UART_XOFF1, 0x13); /* DC3 / XOFF */
+		}
 		serial_out(up, MTK_UART_FEATURE_SEL, 0);
 		mtk8250_disable_intrs(up, MTK_UART_IER_CTSI|MTK_UART_IER_RTSI);
 		mtk8250_enable_intrs(up, MTK_UART_IER_XOFFI);
@@ -486,10 +491,11 @@ static int __maybe_unused mtk8250_runtime_suspend(struct device *dev)
 {
 	struct mtk8250_data *data = dev_get_drvdata(dev);
 	struct uart_8250_port *up = serial8250_get_port(data->line);
+	int timeout = 500;
 
-	/* wait until UART in idle status */
-	while
-		(serial_in(up, MTK_UART_DEBUG0));
+	/* wait until UART in idle status with bounded timeout */
+	while (serial_in(up, MTK_UART_DEBUG0) && --timeout)
+		udelay(10);
 
 	if (data->clk_count == 0U) {
 		dev_dbg(dev, "%s clock count is 0\n", __func__);
@@ -525,14 +531,12 @@ static void
 mtk8250_do_pm(struct uart_port *port, unsigned int state, unsigned int old)
 {
 	if (!state)
-		if (!mtk8250_runtime_resume(port->dev))
-			pm_runtime_get_sync(port->dev);
+		pm_runtime_get_sync(port->dev);
 
 	serial8250_do_pm(port, state, old);
 
 	if (state)
-		if (!pm_runtime_put_sync_suspend(port->dev))
-			mtk8250_runtime_suspend(port->dev);
+		pm_runtime_put_sync_suspend(port->dev);
 }
 
 #ifdef CONFIG_SERIAL_8250_DMA
