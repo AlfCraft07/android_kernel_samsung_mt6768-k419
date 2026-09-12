@@ -42,7 +42,7 @@
 #include <linux/sched/signal.h>
 #include <linux/sched/task.h>
 #include <linux/idr.h>
-#include <linux/edr.h>
+#include <linux/err.h>
 
 struct pid init_struct_pid = {
 	.count 		= ATOMIC_INIT(1),
