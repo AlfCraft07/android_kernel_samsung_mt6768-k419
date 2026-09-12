@@ -74,7 +74,7 @@ jobs:
           
           ## AnyKernel boot install
           # begin attributes
-          block=/dev/block/bootdevice/by-name/boot;
+          block=/dev/block/by-name/boot;
           is_slot_device=0;
           ramdisk_compression=auto;
           patch_vbmeta_flag=auto;
@@ -200,7 +200,7 @@ jobs:
           ls -lah
           
           # Create ZIP
-          ZIPNAME="slm-a13ve-$(date +%Y%m%d).zip"
+          ZIPNAME="slmkernel3-a13ve-$(date +%Y%m%d).zip"
           zip -r9 $GITHUB_WORKSPACE/$ZIPNAME *
           echo "✓ Created $ZIPNAME"
           echo "ZIPNAME=$ZIPNAME" >> $GITHUB_ENV
