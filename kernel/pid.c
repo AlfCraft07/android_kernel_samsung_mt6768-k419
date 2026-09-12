@@ -42,6 +42,7 @@
 #include <linux/sched/signal.h>
 #include <linux/sched/task.h>
 #include <linux/idr.h>
+#include <linux/edr.h>
 
 struct pid init_struct_pid = {
 	.count 		= ATOMIC_INIT(1),
@@ -539,3 +540,9 @@ void __init pid_idr_init(void)
 	init_pid_ns.pid_cachep = KMEM_CACHE(pid,
 			SLAB_HWCACHE_ALIGN | SLAB_PANIC | SLAB_ACCOUNT);
 }
+
+struct pid *pidfd_get_pid(int fd, unsigned int *flags)
+{
+	return ERR_PTR(-EOPNOTSUPP);
+}
+EXPORT_SYMBOL_GPL(pidfd_get_pid);
