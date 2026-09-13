@@ -1562,7 +1562,7 @@ struct mtk_power_gate {
 
 #if 1
 /* FIXME: all values needed to be verified */
-struct mtk_power_gate scp_clks[] __initdata = {
+struct mtk_power_gate scp_clks[] = {
 	PGATE2(SCP_SYS_MFG0, pg_mfg0, NULL, mfg_sel, NULL, SYS_MFG0),
 	PGATE2(SCP_SYS_MFG1, pg_mfg1, NULL, NULL, NULL, SYS_MFG1),
 	PGATE2(SCP_SYS_MD1, pg_md1, NULL, NULL, NULL, SYS_MD1),
