@@ -21,8 +21,7 @@ static int erofs_read_inode(struct inode *inode, void *data)
 	if (ifmt & ~EROFS_I_ALL) {
 		erofs_err(inode->i_sb, "unsupported i_format %u of nid %llu",
 			  ifmt, vi->nid);
-		err = -EOPNOTSUPP;
-		goto err_out;
+		return = -EOPNOTSUPP;
 	}
 
 	vi->datalayout = erofs_inode_datalayout(ifmt);
