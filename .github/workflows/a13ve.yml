@@ -382,7 +382,7 @@ jobs:
           ls -lah
           
           # Create ZIP
-          ZIPNAME="slmkernel3-a13ve-$(date +%Y%m%d).zip"
+          ZIPNAME="legion-a13ve-$(date +%Y%m%d).zip"
           zip -r9 $GITHUB_WORKSPACE/$ZIPNAME *
           echo "✓ Created $ZIPNAME"
           echo "ZIPNAME=$ZIPNAME" >> $GITHUB_ENV
