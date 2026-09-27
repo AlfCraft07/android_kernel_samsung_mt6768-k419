@@ -234,23 +234,20 @@ jobs:
           cd ~/AnyKernel3
           cat > anykernel.sh << 'EOF'
           #!/sbin/sh
-          # AnyKernel3 Script for GTA4XLVE
+          # AnyKernel3 Script for a13ve
           
           ## AnyKernel setup
           # begin properties
           properties() { '
-          kernel.string=slmkernel a13ve (SM-A137F)
+          kernel.string=Legion Kernel for mt6768 platform - Built for a13ve (SM-A137F)
           do.devicecheck=0
           do.modules=0
           do.systemless=1
           do.cleanup=1
           do.cleanuponabort=0
-          device.name1=gta4xlve
-          device.name2=gta4xl
-          device.name3=SM-P613
-          device.name4=gta4xlveu
-          device.name5=SM-P619
-          supported.versions=11-16
+          device.name1=a13ve
+          device.name2=SM-A137F
+          supported.versions=11-17
           supported.patchlevels=
           '; } # end properties
           
@@ -335,10 +332,10 @@ jobs:
           
           # Create custom README for the ZIP
           cat > README.md << 'EOF'
-          # slmkernel a13ve
+          # Legion Kernel for a13ve
           
           ## What's Included
-          - slmkernel for a13ve platform with 5.10 BPF backports
+          - Legion kernel for a13ve platform with 5.15 BPF backports
           - Image.gz - Kernel image for overlay-enabled device
           - AnyKernel3 flasher script
           
@@ -347,7 +344,7 @@ jobs:
           ### LineageOS Users (No TWRP needed!)
           1. Boot into LineageOS Recovery (Vol Up + Power)
           2. Navigate: Apply update → Apply from ADB
-          3. On PC: `adb sideload slm-a13ve-YYYYMMDD.zip`
+          3. On PC: `adb sideload legion-a13ve-YYYYMMDD.zip`
           4. Reboot and enjoy!
           
           ### TWRP/OrangeFox Users
@@ -358,7 +355,7 @@ jobs:
           ## Device Compatibility
           - Samsung Galaxy A13 (SM-A137F)
           - Models: a13ve
-          - Android 11-16 / LineageOS 18-23
+          - Android 11-17 / LineageOS 18-24
           
           ## Credits
           - @IamKavy47 for the script
