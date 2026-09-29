@@ -50,180 +50,77 @@ jobs:
       # KERNELSU-NEXT: Using Legacy Setup Script
       # -----------------------------------------------------------------------
       - name: Setup KernelSU-Next
-        shell: bash
         run: |
-          set -e
-
           echo "=========================================="
           echo "KernelSU-Next Setup (Legacy)"
           echo "=========================================="
-
-          # KernelSU-Next's own setup script clones the repository and checks
-          # out the requested branch/commit. Run it once only.
-          bash <(curl -LSs \
-            "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/legacy/kernel/setup.sh") \
-            legacy
-
-          echo "===== KernelSU commit ====="
-          git -C KernelSU-Next rev-parse HEAD
-          git -C KernelSU-Next log -1 --oneline
-
-          echo "===== KernelSU event.c before patch ====="
-          grep -n \
-            -E "ksu_sulog_boottime|ktime_get_boottime_ts64|get_monotonic_boottime|struct timespec" \
-            KernelSU-Next/kernel/sulog/event.c || true
-
+          
+          # Download and run KernelSU-Next legacy setup script
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/legacy/kernel/setup.sh" | bash -s legacy
+          
+          # --------------------------------------------------------------
+          # Compatibility patches applied on top of the freshly-pulled,
+          # unpinned KernelSU-Next `legacy` source.
+          # --------------------------------------------------------------
           python3 - <<'PYEOF'
-          from pathlib import Path
           import sys
 
-          EVENT = Path("KernelSU-Next/kernel/sulog/event.c")
-          SELINUX_HIDE = Path("KernelSU-Next/kernel/feature/selinux_hide.c")
+          def patch(path, old, new, label):
+              with open(path) as f:
+                  content = f.read()
+              if old not in content:
+                  print(f"::error::[{label}] target string not found in {path} - "
+                        f"KernelSU-Next source has changed upstream, patch needs review")
+                  sys.exit(1)
+              with open(path, "w") as f:
+                  f.write(content.replace(old, new))
+              print(f"[{label}] applied to {path}")
 
+          # Fix KernelSU-Next selinux_hide so app processes don't crash:
+          # selinuxfs expects filp->private_data to be `struct page *`, but
+          # KernelSU-Next passes `page_address(data)` (kernel virtual address),
+          # causing page_to_pfn() to map an invalid physical address and trigger
+          # a Synchronous External Abort (ESR 0x92000006) on app launch.
+          patch(
+              "KernelSU-Next/kernel/feature/selinux_hide.c",
+              "filp->private_data = page_address(data);",
+              "filp->private_data = data;",
+              "selinux_hide page pointer",
+          )
 
-          def fail(label, message):
-              print(f"::error::[{label}] {message}")
-              sys.exit(1)
+          # Fix undefined ksu_init_rc_hook in kprobes mode:
+          # Upstream commit 3c6dca5c added ksu_init_rc_hook checks to ksu_handle_sys_read
+          # and ksu_handle_vfs_read, but only declared it inside #else (non-kprobes mode).
+          patch(
+              "KernelSU-Next/kernel/runtime/ksud_integration.c",
+              "#else\nbool ksu_init_rc_hook __read_mostly = true;\n#endif",
+              "#endif\nbool ksu_init_rc_hook __read_mostly = true;",
+              "ksu_init_rc_hook definition",
+          )
 
+          # Fix execveat sucompat flags parameter check:
+          # Upstream commit 8f77a401 incorrectly checked PT_REGS_SYSCALL_PARM4 (which is envp)
+          # instead of PT_REGS_PARM5 (flags). Since envp is non-null, this caused
+          # sucompat over execveat (used by modern Bionic on Android 15/16) to be bypassed.
+          patch(
+              "KernelSU-Next/kernel/feature/sucompat.c",
+              "(int)PT_REGS_SYSCALL_PARM4(regs) != 0",
+              "(int)PT_REGS_PARM5(regs) != 0",
+              "execveat flags parameter check",
+          )
 
-          # -------------------------------------------------------------------
-          # event.c
-          # -------------------------------------------------------------------
-
-          content = EVENT.read_text()
-
-          old_helper = """#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 19, 0)
-          static inline void ksu_sulog_boottime(struct timespec64 *ts)
-          {
-          	ktime_get_boottime_ts64(ts);
-          }
-          #else
-          static inline void ksu_sulog_boottime(struct timespec *ts)
-          {
-          	get_monotonic_boottime(ts);
-          }
-          #endif"""
-
-          new_helper = """static inline void ksu_sulog_boottime(struct timespec64 *ts)
-          {
-          	ktime_get_boottime_ts64(ts);
-          }"""
-
-          if old_helper in content:
-              content = content.replace(old_helper, new_helper)
-              print("[event.c boottime helper] applied")
-          elif new_helper in content:
-              print("[event.c boottime helper] already patched")
-          else:
-              fail(
-                  "event.c boottime helper",
-                  "Current event.c does not match the expected KernelSU-Next "
-                  "legacy compatibility helper."
-              )
-
-          old_decl = """#if KERNEL_VERSION(4, 19, 0) <= LINUX_VERSION_CODE
-          	struct timespec64 ts;
-          #else
-          	struct timespec ts;
-          #endif"""
-
-          new_decl = """struct timespec64 ts;"""
-
-          occurrences = content.count(old_decl)
-
-          if occurrences:
-              content = content.replace(old_decl, new_decl)
-              print(
-                  f"[event.c timespec declarations] converted "
-                  f"{occurrences} occurrence(s)"
-              )
-          elif content.count(new_decl) >= 2:
-              print("[event.c timespec declarations] already patched")
-          else:
-              fail(
-                  "event.c timespec declarations",
-                  "Expected timespec compatibility declarations were not found."
-              )
-
-          EVENT.write_text(content)
-
-          # -------------------------------------------------------------------
-          # selinux_hide.c
-          # -------------------------------------------------------------------
-          content = SELINUX_HIDE.read_text()
-
-          old_selinux = "filp->private_data = page_address(data);"
-          new_selinux = "filp->private_data = data;"
-
-          if old_selinux in content:
-              content = content.replace(old_selinux, new_selinux)
-              SELINUX_HIDE.write_text(content)
-              print("[selinux_hide page pointer] applied")
-          elif new_selinux in content:
-              print("[selinux_hide page pointer] already patched")
-          else:
-              fail(
-                  "selinux_hide page pointer",
-                  "Neither the original nor patched private_data assignment "
-                  "was found."
-              )
-
+          # Fix supercall fd install privilege check locking out manager/allowed apps:
+          # Upstream commit 3c6dca5c restricted KSU_INSTALL_MAGIC2 to UID 0, but
+          # the manager (and apps requesting root via supercall) run as non-root UIDs
+          # and need the driver fd to execute `ksud debug su` and grant root.
+          patch(
+              "KernelSU-Next/kernel/supercall/supercall.c",
+              "if (current_uid().val != 0)\n\t\t\treturn 0;",
+              "if (current_uid().val != 0 && !allowed_for_su())\n\t\t\treturn 0;",
+              "supercall fd install allowed_for_su check",
+          )
           PYEOF
           
-          echo "=========================================="
-          echo "Patching KernelSU-Next Kprobes compatibility"
-          echo "=========================================="
-
-          python3 - <<'PYEOF'
-          from pathlib import Path
-          import sys
-
-          p = Path("KernelSU-Next/kernel/runtime/ksud_integration.c")
-          content = p.read_text()
-
-          old = """#ifdef KSU_KPROBES_HOOK
-          static struct work_struct __maybe_unused stop_init_rc_hook_work;
-          static struct work_struct __maybe_unused stop_execve_hook_work;
-          static struct work_struct __maybe_unused stop_input_hook_work;
-          static DECLARE_COMPLETION(stop_input_hook_work_complete);
-          #else
-          bool ksu_init_rc_hook __read_mostly = true;
-          #endif"""
-
-          new = """#ifdef KSU_KPROBES_HOOK
-          static struct work_struct __maybe_unused stop_init_rc_hook_work;
-          static struct work_struct __maybe_unused stop_execve_hook_work;
-          static struct work_struct __maybe_unused stop_input_hook_work;
-          static DECLARE_COMPLETION(stop_input_hook_work_complete);
-          #endif
-
-          bool ksu_init_rc_hook __read_mostly = true;"""
-
-          if old in content:
-              content = content.replace(old, new, 1)
-              p.write_text(content)
-              print("[ksud_integration.c ksu_init_rc_hook] applied")
-          elif new in content:
-              print("[ksud_integration.c ksu_init_rc_hook] already patched")
-          else:
-              print("::error::ksu_init_rc_hook compatibility block not found")
-              sys.exit(1)
-          PYEOF
-
-          echo "===== KernelSU integration verification ====="
-          sed -n '155,185p' KernelSU-Next/kernel/runtime/ksud_integration.c
-
-          echo "===== KernelSU symlink verification ====="
-          ls -la drivers/kernelsu
-          readlink -f drivers/kernelsu
-
-          echo "===== ksu_init_rc_hook ====="
-          grep -n "ksu_init_rc_hook" drivers/kernelsu/runtime/ksud_integration.c || true
-
-          echo "===== KernelSU version repository ====="
-          git -C KernelSU-Next rev-parse --is-inside-work-tree
-          git -C KernelSU-Next rev-parse HEAD
-
           echo "=========================================="
           echo "✓ KernelSU-Next setup complete"
           echo "=========================================="
