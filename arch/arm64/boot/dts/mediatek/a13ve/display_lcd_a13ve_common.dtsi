@@ -128,14 +128,31 @@
 
 				lcm_params-dsi-vertical_sync_active = <2>;
 				lcm_params-dsi-vertical_backporch = <10>;
-				lcm_params-dsi-vertical_frontporch = <10>;
+				/* Keep first boot at ~60 Hz on the fixed 90-Hz-capable link. */
+				lcm_params-dsi-vertical_frontporch = <1226>;
+				lcm_params-dsi-vertical_frontporch_for_low_power = <2440>;
 				lcm_params-dsi-horizontal_sync_active = <10>;
 				lcm_params-dsi-horizontal_backporch = <18>;
 				lcm_params-dsi-horizontal_frontporch = <98>;
 
-				lcm_params-dsi-data_rate = <1125>;
+				/*
+				 * Experimental fixed link rate: 1125 * (90 / 60) = 1687.5.
+				 * Keep this rate fixed and switch refresh via VFP only; this
+				 * branch does not implement generic live MIPI-clock switching.
+				 */
+				lcm_params-dsi-data_rate = <1688>;
 				lcm_params-dsi-ssc_disable = <1>;
 				lcm_params-dsi-cont_clock = <1>;
+
+				/* First entry is the boot/default mode: 60 Hz. */
+				lcm_params-dfps_enable = <1>;
+				lcm_params-fps_cnt = <2>;
+				lcm_params-available_fps = <6000 9000>;
+				lcm_params-vact_timing_fps = <9000 9000>;
+				lcm_params-dfps_level = <0 1>;
+				lcm_params-dfps_date_rate = <1688 1688>;
+				lcm_params-dfps_vertical_frontporch = <1226 10>;
+				lcm_params-dfps_vertical_frontporch_for_low_power = <2440 1226>;
 
 				smcdsd_board = <&smcdsd_board_nt36672c>;
 			};

@@ -469,6 +469,12 @@ int __smcdsd_panel_get_params_from_dt(struct LCM_PARAMS *lcm_params)
 				i, &(lcm_params->dsi.dfps_params[i].vact_timing_fps));
 			of_property_read_u32_index(np, "lcm_params-dfps_level",
 				i, &(lcm_params->dsi.dfps_params[i].level));
+			/* Optional per-mode porch values for porch-only refresh switching. */
+			of_property_read_u32_index(np, "lcm_params-dfps_vertical_frontporch",
+				i, &(lcm_params->dsi.dfps_params[i].vertical_frontporch));
+			of_property_read_u32_index(np,
+				"lcm_params-dfps_vertical_frontporch_for_low_power",
+				i, &(lcm_params->dsi.dfps_params[i].vertical_frontporch_for_low_power));
 			of_property_read_u32_index(np, "lcm_params-dfps_date_rate",
 				i, &(lcm_params->dsi.dfps_params[i].PLL_CLOCK));
 			lcm_params->dsi.dfps_params[i].PLL_CLOCK =
