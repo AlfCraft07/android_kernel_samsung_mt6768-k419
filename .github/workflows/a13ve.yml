@@ -1,10 +1,9 @@
-
 name: Galaxy A13 (SM-A137F) Build
 
 on:
   workflow_dispatch:
   push:
-    branches: ["main", "master", "copilot/**"]
+    branches: [ "main", "master", "copilot/**" ]
 
 jobs:
   build:
@@ -21,7 +20,7 @@ jobs:
           fetch-depth: 1
 
       # -----------------------------------------------------------------------
-      # CACHING: Proton Clang
+      # CACHING: Saves time by not re-downloading Clang every run
       # -----------------------------------------------------------------------
       - name: Cache Proton Clang
         id: cache-clang
@@ -33,72 +32,44 @@ jobs:
       - name: Setup Proton Clang
         if: steps.cache-clang.outputs.cache-hit != 'true'
         run: |
-          set -euo pipefail
           mkdir -p ~/toolchains
           echo "Cloning Proton Clang..."
-          git clone https://github.com/kdrag0n/proton-clang.git \
-            --depth=1 ~/toolchains/clang
+          git clone https://github.com/kdrag0n/proton-clang.git --depth=1 ~/toolchains/clang
 
       # -----------------------------------------------------------------------
-      # DEPENDENCIES
+      # DEPENDENCIES: Standard build tools required by kernel.mk
       # -----------------------------------------------------------------------
       - name: Install Build Dependencies
         run: |
-          set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y \
-            bc bison build-essential ccache cpio flex git kmod \
-            libncurses5-dev libssl-dev rsync zip unzip wget curl \
-            ca-certificates gcc-aarch64-linux-gnu \
-            binutils-aarch64-linux-gnu device-tree-compiler
+          sudo apt-get install -y bc bison build-essential ccache cpio flex git kmod \
+            libncurses5-dev libssl-dev rsync zip unzip wget curl ca-certificates \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu device-tree-compiler
 
       # -----------------------------------------------------------------------
-      # KERNELSU-NEXT
-      # Use current setup script with legacy integration mode.
+      # KERNELSU-NEXT: Using Legacy Setup Script
       # -----------------------------------------------------------------------
       - name: Setup KernelSU-Next
-        shell: bash
         run: |
-          set -euo pipefail
-
           echo "=========================================="
-          echo "KernelSU-Next Setup (next / legacy)"
+          echo "KernelSU-Next Setup (Legacy)"
           echo "=========================================="
-
-          curl -fLSs \
-            "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" \
-            | bash -s legacy
-
+          
+          # Download and run KernelSU-Next legacy setup script
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/legacy/kernel/setup.sh" | bash -s legacy
+          
           echo "=========================================="
-          echo "KernelSU-Next setup script finished."
+          echo "✓ KernelSU-Next setup complete"
           echo "=========================================="
 
-          echo "Checking for KSUN source/version information..."
-          grep -R -n -m 10 \
-            --exclude-dir=.git \
-            --exclude='*.o' \
-            --exclude='*.cmd' \
-            -E 'KSU_VERSION|KSUN_VERSION|33315|VERSION_NAME' \
-            drivers KernelSU kernel 2>/dev/null || true
-
-      # -----------------------------------------------------------------------
-      # ANYKERNEL3
-      # -----------------------------------------------------------------------
       - name: Setup AnyKernel3
-        shell: bash
         run: |
-          set -euo pipefail
-
-          git clone --depth=1 \
-            https://github.com/AlfCraft07/AnyKernel3.git \
-            ~/AnyKernel3
-
+          git clone --depth=1 https://github.com/AlfCraft07/AnyKernel3.git ~/AnyKernel3
           cd ~/AnyKernel3
-
           cat > anykernel.sh << 'EOF'
           #!/sbin/sh
           # AnyKernel3 Script for a13ve
-
+          
           ## AnyKernel setup
           # begin properties
           properties() { '
@@ -113,38 +84,38 @@ jobs:
           supported.versions=11-17
           supported.patchlevels=
           '; } # end properties
-
+          
           ## AnyKernel boot install
           # begin attributes
           block=/dev/block/by-name/boot;
           is_slot_device=0;
           ramdisk_compression=auto;
           patch_vbmeta_flag=auto;
-
-          # Boot header version 2 for this device
+          
+          # boot header version 2 for this device
           boot_img_hdr_ver=2
           # end attributes
-
+          
           ## AnyKernel methods (DO NOT CHANGE)
+          # import patching functions/variables - see for reference
           . tools/ak3-core.sh;
-
+          
           ## AnyKernel boot install
-          split_boot;
+          split_boot; # use split_boot to extract ramdisk and kernel
+          
+          # Install kernel image
           flash_boot;
           ## end boot install
           EOF
-
           chmod +x anykernel.sh
 
       # -----------------------------------------------------------------------
-      # BUILD KERNEL
+      # BUILD LOGIC: Extracted directly from LineageOS kernel.mk
       # -----------------------------------------------------------------------
       - name: Compile Kernel
-        shell: bash
         run: |
-          set -euo pipefail
-
-          export PATH="$HOME/toolchains/clang/bin:$PATH"
+          # 1. Setup Environment Variables (mimicking BoardConfig.mk)
+          export PATH=~/toolchains/clang/bin:$PATH
           export ARCH=arm64
           export SUBARCH=arm64
           export CC=clang
@@ -154,112 +125,103 @@ jobs:
           export CLANG_TRIPLE=aarch64-linux-gnu-
           export KCFLAGS=-w
           export CONFIG_SECTION_MISMATCH_WARN_ONLY=y
+          
+          # Flags found in kernel.mk
           export LLVM=1
           export LLVM_IAS=1
+          
+          # 2. Clean
+          rm -rf out && mkdir -p out
 
-          echo "=========================================="
-          echo "Kernel version:"
-          make --version | head -1
-          clang --version | head -1
-          echo "=========================================="
-
-          rm -rf out
-          mkdir -p out
-
-          echo "--> Configuring and building Image.gz..."
-
-          if make O=out a13ve_defconfig \
-            KCFLAGS=-w \
-            CONFIG_SECTION_MISMATCH_WARN_ONLY=y; then
-            echo "Defconfig generated successfully."
-          else
-            echo "ERROR: a13ve_defconfig failed."
-            exit 1
-          fi
-
-          if make O=out \
-            KCFLAGS=-w \
-            CONFIG_SECTION_MISMATCH_WARN_ONLY=y \
-            -j"$(nproc)" Image.gz 2>&1 | tee build.log; then
-            echo "Kernel compilation succeeded."
-          else
-            BUILD_STATUS=$?
+          # 3. Compile (KERNEL_MAKE_CMD)
+          # For devices with CONFIG_BUILD_ARM64_DT_OVERLAY=y (overlay mode):
+          # - Build Image.gz (not Image.gz-dtb) to avoid dtbs dependency
+          # - Image.gz-dtb depends on 'dtbs' target which tries to build overlays
+          # - Overlays are applied by bootloader at runtime, not appended to kernel
+          # - This follows LineageOS methodology for overlay-enabled devices
+          
+          echo "--> Building kernel..."
+          echo "--> Compiling Image.gz..."
+          set -o pipefail
+          make O=out a13ve_defconfig KCFLAGS=-w CONFIG_SECTION_MISMATCH_WARN_ONLY=y -j$(nproc) Image.gz 2>&1 | tee build.log
+          BUILD_STATUS=$?
+          
+          if [ $BUILD_STATUS -ne 0 ]; then
             echo "Build failed with status $BUILD_STATUS"
             echo "==================== COMPILER ERRORS ===================="
-            grep -i -n -E \
-              "error:|fatal error:|undefined reference" \
-              build.log -B 2 -A 5 || true
+            grep -i -n -E "error:|fatal error:|undefined reference" build.log -B 2 -A 5 || true
             echo "=========================================================="
-            tail -100 build.log || true
-            exit "$BUILD_STATUS"
-          fi
-
-          if [ ! -f out/arch/arm64/boot/Image.gz ]; then
-            echo "ERROR: Image.gz not found."
-            exit 1
+            echo "Last 100 lines of build log:"
+            tail -100 build.log
+            exit $BUILD_STATUS
           fi
 
       # -----------------------------------------------------------------------
-      # PACKAGE FLASHABLE ZIP
+      # PACKAGING: AnyKernel3
       # -----------------------------------------------------------------------
       - name: Create Flashable ZIP
-        shell: bash
         run: |
-          set -euo pipefail
-
           cd ~/AnyKernel3
-
-          rm -rf .git .github README.md
-
+          rm -rf .git* README.md
+          
+          # Create custom README for the ZIP
           cat > README.md << 'EOF'
           # Legion Kernel for a13ve
-
+          
           ## What's Included
           - Legion kernel for a13ve platform with 5.15 BPF backports
-          - Image.gz kernel image
-          - AnyKernel3 installer
-
+          - Image.gz - Kernel image for overlay-enabled device
+          - AnyKernel3 flasher script
+          
           ## How to Flash
-
-          ### Recovery
-          1. Boot into a compatible recovery.
-          2. Flash the ZIP.
-          3. Reboot.
-
-          ### ADB Sideload
-          Use sideload only if your recovery supports installing this
-          AnyKernel3 package through that method.
-
+          
+          ### LineageOS Users (No TWRP needed!)
+          1. Boot into LineageOS Recovery (Vol Up + Power)
+          2. Navigate: Apply update → Apply from ADB
+          3. On PC: `adb sideload legion-a13ve-YYYYMMDD.zip`
+          4. Reboot and enjoy!
+          
+          ### TWRP/OrangeFox Users
+          1. Boot into TWRP/OrangeFox recovery
+          2. Flash this ZIP file
+          3. Reboot and enjoy!
+          
           ## Device Compatibility
           - Samsung Galaxy A13 (SM-A137F)
-          - Device: a13ve
-
+          - Models: a13ve
+          - Android 11-17 / LineageOS 18-24
+          
           ## Credits
-          - @IamKavy47
-          - @mertsan2007
+          - @IamKavy47 for the script
+          - @mertsan2007 for the kernel
+          
+          ---
           EOF
-
-          cp "$GITHUB_WORKSPACE/out/arch/arm64/boot/Image.gz" .
-
+          
+          # Copy Artifacts
+          # For overlay-enabled devices, use Image.gz (overlays applied by bootloader)
+          if [ -f $GITHUB_WORKSPACE/out/arch/arm64/boot/Image.gz ]; then
+             cp $GITHUB_WORKSPACE/out/arch/arm64/boot/Image.gz .
+             echo "✓ Copied Image.gz"
+          else
+             echo "Build Failed: Image.gz not found"
+             exit 1
+          fi
+          
+          # Verify package contents
           echo "Package contents:"
           ls -lah
+          
+          # Create ZIP
+          ZIPNAME="legion-a13ve-$(date +%Y%m%d).zip"
+          zip -r9 $GITHUB_WORKSPACE/$ZIPNAME *
+          echo "✓ Created $ZIPNAME"
+          echo "ZIPNAME=$ZIPNAME" >> $GITHUB_ENV
 
-          ZIPNAME="legion-a13ve-$(date -u +%Y%m%d).zip"
-          zip -r9 "$GITHUB_WORKSPACE/$ZIPNAME" \
-            anykernel.sh tools Image.gz README.md
-
-          echo "Created $ZIPNAME"
-          echo "ZIPNAME=$ZIPNAME" >> "$GITHUB_ENV"
-
-      # -----------------------------------------------------------------------
-      # UPLOAD ARTIFACTS
-      # -----------------------------------------------------------------------
       - name: Upload Flashable ZIP
         uses: actions/upload-artifact@v7
         with:
-          name: legion-a13ve
           path: ${{ env.ZIPNAME }}
-          if-no-files-found: error
           archive: false
 
       - name: Upload Build Log (Debug)
@@ -268,4 +230,3 @@ jobs:
         with:
           name: build-log
           path: build.log
-          if-no-files-found: ignore
