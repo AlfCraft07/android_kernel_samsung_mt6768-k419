@@ -2572,9 +2572,26 @@ static int wlanStop(struct net_device *prDev)
  * This first step deliberately accepts only a bare, 8-byte Radiotap header
  * followed by an 802.11 management frame. Radiotap TX metadata is ignored;
  * channel selection remains the responsibility of the existing MONITOR
- * firmware command. Data-frame injection is intentionally not enabled here:
- * it needs a separate path that bypasses the Ethernet/STA queue assumptions.
+ * firmware command.
+ *
+ * YOLO: data frames (type 2) are also pushed through the MMPDU path as raw
+ * 802.11 frames (fgIs802_11, TX_PACKET_TYPE_MGMT) with the real MAC header
+ * length. AWDL needs QoS data for mDNS/AirDrop. Unverified on this firmware.
+ * All injected frames are sent at a fixed 6M OFDM rate (no 11b on 5GHz).
  */
+static uint8_t wlanMonTxHdrLen(uint16_t u2Fc)
+{
+	uint8_t ucLen = WLAN_MAC_MGMT_HEADER_LEN;
+
+	if ((u2Fc & 0x0300) == 0x0300)	/* ToDS && FromDS: addr4 */
+		ucLen += 6;
+	if ((u2Fc & 0x000C) == 0x0008 && (u2Fc & 0x0080))	/* QoS data */
+		ucLen += 2;
+	if (u2Fc & 0x8000)	/* order bit: HT control (mgmt or QoS) */
+		ucLen += 4;
+	return ucLen;
+}
+
 static netdev_tx_t wlanMonStartXmit(struct sk_buff *skb,
 				   struct net_device *prDev)
 {
@@ -2586,7 +2603,9 @@ static netdev_tx_t wlanMonStartXmit(struct sk_buff *skb,
 	uint8_t ucBssIndex;
 	uint16_t u2RadiotapLen;
 	uint16_t u2FrameCtrl;
+	uint16_t u2FcType;
 	uint16_t u2FrameLen;
+	uint8_t ucHdrLen;
 	uint32_t u4Status;
 
 	if (!skb)
@@ -2623,8 +2642,13 @@ static netdev_tx_t wlanMonStartXmit(struct sk_buff *skb,
 	u2FrameCtrl = (uint16_t)pucFrame[0] |
 		      ((uint16_t)pucFrame[1] << 8);
 
-	/* Type 0 only. Do not misroute control or data frames through MMPDU TX. */
-	if ((u2FrameCtrl & MASK_FC_TYPE) != 0)
+	/* Management (0) and data (2) only; control frames are never injected. */
+	u2FcType = u2FrameCtrl & MASK_FC_TYPE;
+	if (u2FcType != 0 && u2FcType != 0x0008)
+		goto drop;
+
+	ucHdrLen = wlanMonTxHdrLen(u2FrameCtrl);
+	if (u2FrameLen < ucHdrLen)
 		goto drop;
 
 	ucBssIndex = wlanGetBssIdx(prGlueInfo->prDevHandler);
@@ -2643,8 +2667,12 @@ static netdev_tx_t wlanMonStartXmit(struct sk_buff *skb,
 	/* NULL TX-done callback lets the normal MMPDU completion path free it. */
 	nicTxSetMngPacket(prAdapter, prMgmtMsdu, ucBssIndex,
 			  STA_REC_INDEX_NOT_FOUND,
-			  WLAN_MAC_MGMT_HEADER_LEN, u2FrameLen, NULL,
-			  MSDU_RATE_MODE_AUTO);
+			  ucHdrLen, u2FrameLen, NULL,
+			  MSDU_RATE_MODE_MANUAL_DESC);
+	/* Force 6M OFDM; must come after nicTxSetMngPacket (it zeroes options). */
+	prMgmtMsdu->fgIsTXDTemplateValid = FALSE;
+	nicTxSetPktFixedRateOption(prAdapter, prMgmtMsdu, RATE_OFDM_6M,
+				   FIX_BW_NO_FIXED, FALSE, FALSE);
 
 	u4Status = nicTxEnqueueMsdu(prAdapter, prMgmtMsdu);
 	dev_kfree_skb_any(skb);

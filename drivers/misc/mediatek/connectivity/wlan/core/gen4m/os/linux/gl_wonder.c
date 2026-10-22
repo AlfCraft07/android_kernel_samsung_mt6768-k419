@@ -18,6 +18,12 @@
  *   radiotap0 RX-> rx_handler on radiotap0 re-targets skbs at wonder0.
  *   channel     -> same firmware command as the "MONITOR" private command.
  *
+ * YOLO revision: data frames are now bridged too (AWDL mDNS/AirDrop ride QoS
+ * data), channel 149 is brought up automatically when wonder0 opens (so
+ * radiotap0 exists even if the vendor-command attribute guesses are wrong),
+ * channel/reg failures are logged, and get_if_mac_addr replies with the MAC
+ * under several attribute ids. Everything still unverified on hardware.
+ *
  * STATUS: first draft, not compiled against or run on a device by the author.
  * The vendor-command attribute layout is unknown and is logged / guessed, see
  * wonder_vendor_* below.
@@ -34,6 +40,7 @@
 #include <linux/rtnetlink.h>
 #include <linux/workqueue.h>
 #include <linux/moduleparam.h>
+#include <linux/delay.h>
 
 #define WONDER_PHY_NAME		"wonder"
 #define WONDER_IF_NAME		"wonder0"
@@ -45,6 +52,14 @@
 static int wonder_mac_attr = 1;
 module_param(wonder_mac_attr, int, 0644);
 
+/* 1: do not reject channels rlmDomainIsLegalChannel() says are not legal. */
+static int wonder_force_reg;
+module_param(wonder_force_reg, int, 0644);
+
+/* 1: tune to wonder_cur_freq (default 5745) as soon as wonder0 is opened. */
+static int wonder_auto_chan = 1;
+module_param(wonder_auto_chan, int, 0644);
+
 struct wonder_vif {
 	struct wireless_dev wdev;
 };
@@ -55,6 +70,7 @@ static struct net_device __rcu *wonder_mon_dev;	/* gen4m radiotap0 */
 static u8 wonder_mac[ETH_ALEN];
 static u32 wonder_cur_freq;
 static struct work_struct wonder_up_work;
+static struct work_struct wonder_chan_work;
 
 /* ---------------------------------------------------------------- */
 /* channel control via the existing gen4m MONITOR firmware command  */
@@ -84,7 +100,10 @@ static int wonder_set_channel_mhz(u32 mhz)
 	}
 
 	eBand = (ch <= 14) ? BAND_2G4 : BAND_5G;
-	if (!rlmDomainIsLegalChannel(prGlueInfo->prAdapter, eBand, ch)) {
+	if (!wonder_force_reg &&
+	    !rlmDomainIsLegalChannel(prGlueInfo->prAdapter, eBand, ch)) {
+		pr_warn("wonder: ch%d (%u MHz) not legal in current domain; set wonder_force_reg=1 to override\n",
+			ch, mhz);
 		dev_put(sta);
 		return -EINVAL;
 	}
@@ -105,9 +124,13 @@ static int wonder_set_channel_mhz(u32 mhz)
 			   FALSE, FALSE, TRUE, &u4BufLen);
 	dev_put(sta);
 
-	if (rStatus != WLAN_STATUS_SUCCESS)
+	if (rStatus != WLAN_STATUS_SUCCESS) {
+		pr_warn("wonder: MONITOR ioctl for ch%d failed (0x%x)\n", ch,
+			rStatus);
 		return -EIO;
+	}
 
+	pr_info("wonder: monitor channel set to ch%d (%u MHz)\n", ch, mhz);
 	wonder_cur_freq = mhz;
 	return 0;
 }
@@ -135,7 +158,8 @@ static netdev_tx_t wonder_xmit(struct sk_buff *skb, struct net_device *dev)
 	frame = skb->data + rt_len;
 	flen = skb->len - rt_len;
 	fc = frame[0] | (frame[1] << 8);
-	if (fc & 0x000c)	/* management frames only for now */
+	/* management (0) and data (2) only; never inject control frames */
+	if ((fc & 0x000c) != 0 && (fc & 0x000c) != 0x0008)
 		goto drop;
 
 	rcu_read_lock();
@@ -168,10 +192,27 @@ drop:
 	return NETDEV_TX_OK;
 }
 
+static void wonder_chan_workfn(struct work_struct *w)
+{
+	u32 f = wonder_cur_freq ? wonder_cur_freq : WONDER_DEFAULT_FREQ;
+	int i, ret = -ENODEV;
+
+	/* wlan0 / firmware may not be ready yet: retry for ~5 s */
+	for (i = 0; i < 10 && ret == -ENODEV; i++) {
+		ret = wonder_set_channel_mhz(f);
+		if (ret == -ENODEV)
+			msleep(500);
+	}
+	if (ret)
+		pr_warn("wonder: auto channel %u MHz failed: %d\n", f, ret);
+}
+
 static int wonder_open(struct net_device *dev)
 {
 	netif_carrier_on(dev);
 	netif_tx_start_all_queues(dev);
+	if (wonder_auto_chan)
+		schedule_work(&wonder_chan_work);
 	return 0;
 }
 
@@ -296,18 +337,50 @@ static int wonder_vendor_set_frequency(struct wiphy *wiphy,
 	int rem;
 
 	wonder_dump_attrs("set_frequency", data, len);
-	/* Heuristic: first 4-byte attr that looks like a Wi-Fi MHz value. */
+	/* Heuristic: first attr that looks like a Wi-Fi MHz value, else a
+	 * channel number (u8/u16/u32). Never fail the command: mosey_server
+	 * aborts on error, and wonder_auto_chan covers a missed parse.
+	 */
 	if (data && len > 0) {
+		int done = 0;
+
 		nla_for_each_attr(a, data, len, rem) {
 			u32 v;
 
-			if (nla_len(a) != sizeof(u32))
+			if (nla_len(a) == sizeof(u32))
+				v = nla_get_u32(a);
+			else if (nla_len(a) == sizeof(u16))
+				v = nla_get_u16(a);
+			else if (nla_len(a) == sizeof(u8))
+				v = nla_get_u8(a);
+			else
 				continue;
-			v = nla_get_u32(a);
 			if ((v >= 2412 && v <= 2484) ||
 			    (v >= 5180 && v <= 5885)) {
 				wonder_set_channel_mhz(v);
+				done = 1;
 				break;
+			}
+		}
+		if (!done) {
+			nla_for_each_attr(a, data, len, rem) {
+				u32 v, f;
+
+				if (nla_len(a) == sizeof(u32))
+					v = nla_get_u32(a);
+				else if (nla_len(a) == sizeof(u16))
+					v = nla_get_u16(a);
+				else if (nla_len(a) == sizeof(u8))
+					v = nla_get_u8(a);
+				else
+					continue;
+				f = ieee80211_channel_to_frequency(v,
+					v <= 14 ? NL80211_BAND_2GHZ :
+						  NL80211_BAND_5GHZ);
+				if (f) {
+					wonder_set_channel_mhz(f);
+					break;
+				}
 			}
 		}
 	}
@@ -327,10 +400,18 @@ static int wonder_vendor_get_mac(struct wiphy *wiphy, struct wireless_dev *wdev,
 	struct sk_buff *reply;
 
 	wonder_dump_attrs("get_if_mac_addr", data, len);
-	reply = cfg80211_vendor_cmd_alloc_reply_skb(wiphy, 16);
+	reply = cfg80211_vendor_cmd_alloc_reply_skb(wiphy, 96);
 	if (!reply)
 		return -ENOMEM;
-	if (nla_put(reply, wonder_mac_attr, ETH_ALEN, wonder_mac)) {
+	/* Attribute layout unknown: answer under ids 1..3 (and the module
+	 * param id if it is elsewhere); a parser keyed on any of them wins.
+	 */
+	if (nla_put(reply, 1, ETH_ALEN, wonder_mac) ||
+	    nla_put(reply, 2, ETH_ALEN, wonder_mac) ||
+	    nla_put(reply, 3, ETH_ALEN, wonder_mac) ||
+	    ((wonder_mac_attr < 1 || wonder_mac_attr > 3) &&
+	     wonder_mac_attr > 0 &&
+	     nla_put(reply, wonder_mac_attr, ETH_ALEN, wonder_mac))) {
 		kfree_skb(reply);
 		return -ENOBUFS;
 	}
@@ -476,6 +557,7 @@ static int __init wonder_init(void)
 
 	eth_random_addr(wonder_mac);
 	INIT_WORK(&wonder_up_work, wonder_up_workfn);
+	INIT_WORK(&wonder_chan_work, wonder_chan_workfn);
 
 	wonder_wiphy = wiphy_new_nm(&wonder_cfg_ops, 0, WONDER_PHY_NAME);
 	if (!wonder_wiphy)
