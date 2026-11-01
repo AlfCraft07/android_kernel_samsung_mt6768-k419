@@ -31,6 +31,7 @@ ccflags-y += -DION_HISTORY_RECORD
 obj-$(CONFIG_MTK_ION) += ion_drv.o ion_mm_heap.o ion_fb_heap.o ion_sec_heap.o ion_profile.o ion_dma_reserved_heap.o
 obj-$(CONFIG_MTK_ION) += ion_history.o
 obj-$(CONFIG_MTK_ION) += ion_comm.o
+obj-$(CONFIG_DMABUF_HEAPS_MTK_MM) += mtk_mm_dma_heap.o
 
 ifeq ($(CONFIG_MTK_ENG_BUILD), y)
 ccflags-y += -DION_RUNTIME_DEBUGGER=1
