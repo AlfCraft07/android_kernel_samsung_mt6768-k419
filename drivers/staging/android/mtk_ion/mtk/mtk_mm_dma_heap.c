@@ -21,8 +21,10 @@
 #include <linux/dma-buf.h>
 #include <linux/dma-heap.h>
 #include <linux/err.h>
+#include <linux/kobject.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
+#include <linux/sysfs.h>
 #include <linux/workqueue.h>
 
 #include "ion.h"
@@ -105,6 +107,36 @@ static const struct dma_heap_ops mtk_mm_heap_ops = {
 	.allocate = mtk_mm_heap_allocate,
 };
 
+/*
+ * /sys/kernel/dma_heap/total_pools_kb
+ *
+ * Same path and meaning as the Android common kernel node that libmeminfo
+ * reads: kB of free memory held in heap page pools. The only pooled heap on
+ * this kernel is the MTK ION mm heap behind mtk_mm, so report its pools.
+ */
+static ssize_t total_pools_kb_show(struct kobject *kobj,
+				   struct kobj_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%lu\n", ion_mm_heap_pools_kb());
+}
+
+static struct kobj_attribute total_pools_kb_attr = __ATTR_RO(total_pools_kb);
+
+static void mtk_mm_dma_heap_sysfs_init(void)
+{
+	struct kobject *kobj;
+
+	kobj = kobject_create_and_add("dma_heap", kernel_kobj);
+	if (!kobj) {
+		pr_warn("cannot create /sys/kernel/dma_heap\n");
+		return;
+	}
+	if (sysfs_create_file(kobj, &total_pools_kb_attr.attr)) {
+		pr_warn("cannot create total_pools_kb\n");
+		kobject_put(kobj);
+	}
+}
+
 static int __init mtk_mm_dma_heap_init(void)
 {
 	struct dma_heap_export_info exp_info;
@@ -117,6 +149,8 @@ static int __init mtk_mm_dma_heap_init(void)
 	heap = dma_heap_add(&exp_info);
 	if (IS_ERR(heap))
 		return PTR_ERR(heap);
+
+	mtk_mm_dma_heap_sysfs_init();
 
 	pr_info("registered /dev/dma_heap/%s\n", MTK_MM_HEAP_NAME);
 	return 0;

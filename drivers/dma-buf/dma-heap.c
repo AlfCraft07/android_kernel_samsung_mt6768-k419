@@ -312,6 +312,14 @@ err0:
 
 static char *dma_heap_devnode(struct device *dev, umode_t *mode)
 {
+	/*
+	 * Default to world access so apps can open heaps without a per-heap
+	 * ueventd rule. Heap nodes only allocate memory (no read/write of
+	 * other users' buffers); SELinux still gates who may open them.
+	 */
+	if (mode)
+		*mode = 0666;
+
 	return kasprintf(GFP_KERNEL, "dma_heap/%s", dev_name(dev));
 }
 
