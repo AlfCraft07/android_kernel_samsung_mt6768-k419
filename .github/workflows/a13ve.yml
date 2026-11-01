@@ -143,9 +143,17 @@ jobs:
           echo "--> Building kernel..."
           echo "--> Compiling Image.gz..."
           set -o pipefail
-          make O=out a13ve_defconfig KCFLAGS=-w CONFIG_SECTION_MISMATCH_WARN_ONLY=y -j$(nproc) Image.gz 2>&1 | tee build.log
-          BUILD_STATUS=$?
           
+          if make O=out a13ve_defconfig KCFLAGS=-w CONFIG_SECTION_MISMATCH_WARN_ONLY=y -j"$(nproc)" Image.gz 2>&1 | tee build.log; then
+              echo "Kernel build succeeded"
+          else
+              BUILD_STATUS=$?
+              echo "Kernel build failed with status $BUILD_STATUS"
+              grep -i -n -E "error:|fatal error:|undefined reference|No rule to make target" build.log -B 2 -A 5 || true
+              tail -100 build.log
+              exit "$BUILD_STATUS"
+          fi
+                    
           if [ $BUILD_STATUS -ne 0 ]; then
             echo "Build failed with status $BUILD_STATUS"
             echo "==================== COMPILER ERRORS ===================="

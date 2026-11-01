@@ -1,0 +1,55 @@
+name: Sync upstream legion-mt6768
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          ref: legion-mt6768
+          token: ${{ secrets.PUSH_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream
+        run: |
+          git remote add upstream https://github.com/AlfCraft07/android_kernel_samsung_mt6768-k419.git
+          git fetch --no-tags --depth=10 upstream legion-mt6768
+          git fetch --no-tags --depth=10 origin legion-mt6768
+      - name: Rebase onto upstream
+        run: |
+          set +e
+          git rebase upstream/legion-mt6768
+          result=$?
+          set -e
+
+          while [ "$result" -ne 0 ]; do
+            conflicts=$(git diff --name-only --diff-filter=U)
+
+            if echo "$conflicts" | grep -qx '.github/workflows/a13ve.yml'; then
+              git checkout --theirs .github/workflows/a13ve.yml
+              git add -f .github/workflows/a13ve.yml
+              GIT_EDITOR=true git rebase --continue
+            else
+              echo "Unexpected conflict(s):"
+              printf '%s\n' "$conflicts"
+              exit 1
+            fi
+
+            result=$?
+          done
+      - name: Push rebased branch
+        run: |
+          git push --force-with-lease origin HEAD:legion-mt6768

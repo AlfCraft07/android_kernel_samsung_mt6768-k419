@@ -2566,10 +2566,109 @@ static int wlanStop(struct net_device *prDev)
 }				/* end of wlanStop() */
 
 #if CFG_SUPPORT_SNIFFER
+/*
+ * Experimental TX path for the proprietary radiotap monitor interface.
+ *
+ * This first step deliberately accepts only a bare, 8-byte Radiotap header
+ * followed by an 802.11 management frame. Radiotap TX metadata is ignored;
+ * channel selection remains the responsibility of the existing MONITOR
+ * firmware command. Data-frame injection is intentionally not enabled here:
+ * it needs a separate path that bypasses the Ethernet/STA queue assumptions.
+ */
+static netdev_tx_t wlanMonStartXmit(struct sk_buff *skb,
+				   struct net_device *prDev)
+{
+	struct NETDEV_PRIVATE_GLUE_INFO *prNetDevPriv;
+	struct GLUE_INFO *prGlueInfo;
+	struct ADAPTER *prAdapter;
+	struct MSDU_INFO *prMgmtMsdu;
+	uint8_t *pucFrame;
+	uint8_t ucBssIndex;
+	uint16_t u2RadiotapLen;
+	uint16_t u2FrameCtrl;
+	uint16_t u2FrameLen;
+	uint32_t u4Status;
+
+	if (!skb)
+		return NETDEV_TX_OK;
+
+	prNetDevPriv = (struct NETDEV_PRIVATE_GLUE_INFO *)netdev_priv(prDev);
+	prGlueInfo = prNetDevPriv->prGlueInfo;
+	if (!prGlueInfo || !prGlueInfo->prAdapter ||
+	    !prGlueInfo->prDevHandler || !prGlueInfo->fgIsEnableMon ||
+	    !prGlueInfo->u4ReadyFlag)
+		goto drop;
+	prAdapter = prGlueInfo->prAdapter;
+
+	/* skb_linearize() may fail; ndo_start_xmit must always consume skb. */
+	if (skb_linearize(skb))
+		goto drop;
+
+	/* Minimal Radiotap header: version 0, length 8, no present fields. */
+	if (skb->len < 8 || skb->data[0] != 0 || skb->data[1] != 0 ||
+	    skb->data[4] != 0 || skb->data[5] != 0 ||
+	    skb->data[6] != 0 || skb->data[7] != 0)
+		goto drop;
+
+	u2RadiotapLen = (uint16_t)skb->data[2] |
+			((uint16_t)skb->data[3] << 8);
+	if (u2RadiotapLen != 8 || skb->len <= u2RadiotapLen)
+		goto drop;
+
+	pucFrame = skb->data + u2RadiotapLen;
+	if (skb->len - u2RadiotapLen < WLAN_MAC_MGMT_HEADER_LEN ||
+           skb->len - u2RadiotapLen > MGT_BUFFER_SIZE - MAC_TX_RESERVED_FIELD)
+		goto drop;
+	u2FrameLen = (uint16_t)(skb->len - u2RadiotapLen);
+	u2FrameCtrl = (uint16_t)pucFrame[0] |
+		      ((uint16_t)pucFrame[1] << 8);
+
+	/* Type 0 only. Do not misroute control or data frames through MMPDU TX. */
+	if ((u2FrameCtrl & MASK_FC_TYPE) != 0)
+		goto drop;
+
+	ucBssIndex = wlanGetBssIdx(prGlueInfo->prDevHandler);
+	if (!IS_BSS_INDEX_VALID(ucBssIndex))
+		goto drop;
+
+	/* Match the driver's existing cfg80211 management-frame buffer layout. */
+	prMgmtMsdu = cnmMgtPktAlloc(prAdapter,
+				    u2FrameLen + MAC_TX_RESERVED_FIELD);
+	if (!prMgmtMsdu)
+		goto drop;
+
+	kalMemCopy((uint8_t *)prMgmtMsdu->prPacket + MAC_TX_RESERVED_FIELD,
+		   pucFrame, u2FrameLen);
+
+	/* NULL TX-done callback lets the normal MMPDU completion path free it. */
+	nicTxSetMngPacket(prAdapter, prMgmtMsdu, ucBssIndex,
+			  STA_REC_INDEX_NOT_FOUND,
+			  WLAN_MAC_MGMT_HEADER_LEN, u2FrameLen, NULL,
+			  MSDU_RATE_MODE_AUTO);
+
+	u4Status = nicTxEnqueueMsdu(prAdapter, prMgmtMsdu);
+	dev_kfree_skb_any(skb);
+	if (u4Status != WLAN_STATUS_SUCCESS) {
+		prDev->stats.tx_dropped++;
+		return NETDEV_TX_OK;
+	}
+
+	/* Counts accepted by the driver, not confirmed over-the-air delivery. */
+	prDev->stats.tx_packets++;
+	prDev->stats.tx_bytes += u2FrameLen;
+	return NETDEV_TX_OK;
+
+drop:
+	prDev->stats.tx_dropped++;
+	dev_kfree_skb_any(skb);
+	return NETDEV_TX_OK;
+}
+
 static int wlanMonOpen(struct net_device *prDev)
 {
 	ASSERT(prDev);
 
+	netif_carrier_on(prDev);
 	netif_tx_start_all_queues(prDev);
 
 	return 0;		/* success */
@@ -2580,6 +2679,7 @@ static int wlanMonStop(struct net_device *prDev)
 	ASSERT(prDev);
 
 	netif_tx_stop_all_queues(prDev);
+	netif_carrier_off(prDev);
 
 	return 0;		/* success */
 }
@@ -2587,6 +2687,7 @@ static int wlanMonStop(struct net_device *prDev)
 static const struct net_device_ops wlan_mon_netdev_ops = {
 	.ndo_open = wlanMonOpen,
 	.ndo_stop = wlanMonStop,
+	.ndo_start_xmit = wlanMonStartXmit,
 };
 
 void wlanMonWorkHandler(struct work_struct *work)
